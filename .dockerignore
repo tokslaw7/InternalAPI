@@ -1,0 +1,11 @@
+node_modules
+.next
+coverage
+dist
+.git
+.vscode
+package-lock.json
+npm-debug.log
+.env
+.env.local
+.env.*.local

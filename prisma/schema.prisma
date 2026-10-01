@@ -1,0 +1,225 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MembershipRole {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum RequestMethod {
+  GET
+  POST
+  PUT
+  PATCH
+  DELETE
+  HEAD
+  OPTIONS
+}
+
+enum HttpBodyType {
+  NONE
+  RAW
+  JSON
+  FORM
+}
+
+enum AuthType {
+  NONE
+  BEARER
+  BASIC
+  API_KEY
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  INVITE
+  REGISTER
+  LOGIN
+  LOGOUT
+}
+
+model Organization {
+  id           String       @id @default(cuid())
+  name         String
+  slug         String       @unique
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  memberships  Membership[]
+  inviteCodes  InviteCode[]
+  projects     Project[]
+  auditEvents  AuditEvent[]
+}
+
+model User {
+  id                  String        @id @default(cuid())
+  name                String
+  email               String        @unique
+  passwordHash        String
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  memberships         Membership[]
+  sessions            Session[]
+  inviteCodesCreated   InviteCode[]  @relation("InviteCodeCreatedBy")
+  auditEvents         AuditEvent[]   @relation("AuditActor")
+  requestRuns         RequestRun[]
+}
+
+model Membership {
+  id             String           @id @default(cuid())
+  organizationId String
+  userId         String
+  role           MembershipRole   @default(VIEWER)
+  createdAt      DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+}
+
+model InviteCode {
+  id              String      @id @default(cuid())
+  organizationId  String
+  code            String      @unique
+  createdByUserId  String?
+  usesRemaining   Int         @default(1)
+  expiresAt       DateTime?
+  createdAt       DateTime    @default(now())
+  consumedAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("InviteCodeCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Project {
+  id             String     @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String     @unique
+  description    String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  folders      Folder[]
+  environments  Environment[]
+}
+
+model Folder {
+  id         String    @id @default(cuid())
+  projectId  String
+  parentId   String?
+  name       String
+  sortOrder  Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent   Folder?   @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children Folder[]  @relation("FolderTree")
+  requests ApiRequest[]
+
+  @@index([projectId, parentId])
+}
+
+model ApiRequest {
+  id          String       @id @default(cuid())
+  folderId    String
+  name        String
+  method      RequestMethod
+  url         String
+  headers     Json
+  queryParams Json
+  bodyType    HttpBodyType @default(NONE)
+  body        String?
+  authType    AuthType     @default(NONE)
+  authConfig  Json?
+  assertions  Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  folder Folder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  runs   RequestRun[]
+}
+
+model Environment {
+  id         String               @id @default(cuid())
+  projectId  String
+  name       String
+  isDefault  Boolean              @default(false)
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+
+  project   Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  variables EnvironmentVariable[]
+  runs      RequestRun[]
+
+  @@unique([projectId, name])
+}
+
+model EnvironmentVariable {
+  id              String      @id @default(cuid())
+  environmentId   String
+  key             String
+  valueEncrypted  String
+  isSecret        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  @@unique([environmentId, key])
+}
+
+model RequestRun {
+  id              String      @id @default(cuid())
+  requestId       String
+  environmentId   String?
+  userId          String
+  statusCode      Int?
+  ok              Boolean     @default(false)
+  durationMs      Int?
+  responseHeaders Json?
+  responseBody    String?
+  errorMessage    String?
+  createdAt       DateTime    @default(now())
+
+  request     ApiRequest   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  environment Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuditEvent {
+  id             String       @id @default(cuid())
+  organizationId String
+  actorUserId    String?
+  entityType     String
+  entityId       String
+  action         AuditAction
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor        User?        @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+}
